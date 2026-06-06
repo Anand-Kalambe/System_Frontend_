@@ -1,0 +1,30 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  background-color: #050505;
+  color: white;
+  font-family: 'Space Mono', monospace;
+  overflow-x: hidden;
+}
+
+h1, h2, h3, .sys-font {
+  font-family: 'Orbitron', sans-serif;
+}
+
+/* Custom Neon Glow Utilities */
+.glow-text {
+  text-shadow: 0 0 10px rgba(0, 255, 204, 0.7);
+}
+
+.glow-border {
+  box-shadow: 0 0 15px rgba(0, 255, 204, 0.2);
+  border: 1px solid rgba(0, 255, 204, 0.5);
+}
+
+.clip-corner {
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 15px), calc(100% - 15px) 100%, 0 100%);
+}

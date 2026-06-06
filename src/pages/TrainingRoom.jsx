@@ -20,6 +20,7 @@ export default function TrainingRoom() {
     const streamRef = useRef(null);
     const intervalRef = useRef(null);
     const panelRef = useRef(null);
+    const isProcessingRef = useRef(false);
 
     // Synchronize fullscreen state with browser events (e.g. if user presses Escape)
     useEffect(() => {
@@ -103,6 +104,7 @@ export default function TrainingRoom() {
             };
 
             wsRef.current.onmessage = (event) => {
+                isProcessingRef.current = false; // Unlock sending next frame
                 const data = JSON.parse(event.data);
                 
                 // Update reps if Python sends them
@@ -134,20 +136,25 @@ export default function TrainingRoom() {
     const captureAndSendFrame = () => {
         if (!videoRef.current || !canvasRef.current || !wsRef.current) return;
         if (wsRef.current.readyState !== WebSocket.OPEN) return;
+        if (isProcessingRef.current) return; // Prevent WebSocket flood/lag
 
         const video = videoRef.current;
         const canvas = canvasRef.current;
         const context = canvas.getContext('2d');
 
-        // Set canvas size to match video
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
+        // Downscale image to vastly improve server AI processing speed and reduce network load
+        const max_width = 480;
+        const scale = Math.min(1, max_width / video.videoWidth);
+        canvas.width = video.videoWidth * scale;
+        canvas.height = video.videoHeight * scale;
 
         // Draw the current video frame onto the canvas
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
         // Convert the canvas to a Base64 string and send it to Python!
         const base64Image = canvas.toDataURL('image/jpeg', 0.5);
+        
+        isProcessingRef.current = true; // Lock until server responds
         wsRef.current.send(base64Image);
     };
 

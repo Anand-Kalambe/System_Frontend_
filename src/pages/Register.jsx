@@ -18,7 +18,7 @@ export default function Register() {
 
         try {
             // Hit your REAL Node.js registration endpoint
-            const res = await axios.post('http://localhost:5000/api/auth/register', { 
+            const res = await axios.post('https://system-backend-60o1.onrender.com/api/auth/register', { 
                 username,
                 email, 
                 password 

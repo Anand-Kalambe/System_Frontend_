@@ -15,7 +15,7 @@ export default function Dashboard() {
                     navigate('/'); 
                     return;
                 }
-                const res = await axios.get('http://localhost:5000/api/hunter/profile', {
+                const res = await axios.get('https://system-backend-60o1.onrender.com/api/hunter/profile', {
                     headers: { 'x-auth-token': token }
                 });
                 setHunter(res.data);

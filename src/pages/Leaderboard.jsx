@@ -8,7 +8,7 @@ export default function Leaderboard() {
     useEffect(() => {
         const fetchLeaderboard = async () => {
             try {
-                const res = await axios.get('http://localhost:5000/api/hunter/leaderboard');
+                const res = await axios.get('https://system-backend-60o1.onrender.com/api/hunter/leaderboard');
                 setHunters(res.data);
             } catch (err) {
                 console.error("Failed to load Leaderboard", err);

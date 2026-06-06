@@ -14,7 +14,7 @@ export default function Login() {
         
         try {
             // 1. Hit your REAL Node.js login endpoint
-            const res = await axios.post('http://localhost:5000/api/auth/login', { 
+            const res = await axios.post('https://system-backend-60o1.onrender.com/api/auth/login', { 
                 email: email, 
                 password: password 
             });

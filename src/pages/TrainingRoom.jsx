@@ -91,7 +91,7 @@ export default function TrainingRoom() {
             }
 
             // 2. Connect to the Python WebSocket Server
-            const wsUrl = `ws://localhost:8000/ws/${exercise}`; 
+            const wsUrl = `wss://system-mediapipe-1.onrender.com/ws/${exercise}`;
             wsRef.current = new WebSocket(wsUrl);
 
             wsRef.current.onopen = () => {
@@ -178,7 +178,7 @@ export default function TrainingRoom() {
                     ? { completedPushups: reps } 
                     : { completedSquats: reps };
 
-                await axios.post('http://localhost:5000/api/hunter/quest/update', payload, {
+                await axios.post('https://system-backend-60o1.onrender.com/api/hunter/quest/update', payload, {
                     headers: { 'x-auth-token': token }
                 });
 

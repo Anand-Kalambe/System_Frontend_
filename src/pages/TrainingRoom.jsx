@@ -10,17 +10,24 @@ export default function TrainingRoom() {
     const [cameraStatus, setCameraStatus] = useState("OFFLINE");
     const [reps, setReps] = useState(0);
     const [errorMsg, setErrorMsg] = useState("");
-    const [processedFrame, setProcessedFrame] = useState(null); // <-- NEW: Stores the AI image
     const [isFullscreen, setIsFullscreen] = useState(false);
 
     // References to control the video stream and websocket
     const videoRef = useRef(null);
-    const canvasRef = useRef(null);
+    const canvasRef = useRef(null); // Used for capturing frames to send
+    const overlayCanvasRef = useRef(null); // Used for drawing AI skeleton
     const wsRef = useRef(null);
     const streamRef = useRef(null);
     const intervalRef = useRef(null);
     const panelRef = useRef(null);
     const isProcessingRef = useRef(false);
+
+    const SKELETON_FULL = [
+        [11, 12], [11, 13], [13, 15], [12, 14], [14, 16],
+        [11, 23], [12, 24], [23, 24], [23, 25], [25, 27],
+        [24, 26], [26, 28], [27, 29], [28, 30], [29, 31],
+        [30, 32], [27, 31], [28, 32]
+    ];
 
     // Synchronize fullscreen state with browser events (e.g. if user presses Escape)
     useEffect(() => {
@@ -112,9 +119,13 @@ export default function TrainingRoom() {
                     setReps(data.reps);
                 }
                 
-                // NEW: Update the image frame if Python sends it
-                if (data.frame) {
-                    setProcessedFrame(`data:image/jpeg;base64,${data.frame}`);
+                if (data.landmarks && overlayCanvasRef.current && videoRef.current) {
+                    drawOverlay(data);
+                } else if (overlayCanvasRef.current && videoRef.current) {
+                    // Clear overlay if no landmarks
+                    const canvas = overlayCanvasRef.current;
+                    const ctx = canvas.getContext('2d');
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
                 }
             };
 
@@ -158,6 +169,74 @@ export default function TrainingRoom() {
         wsRef.current.send(base64Image);
     };
 
+    const drawOverlay = (data) => {
+        const canvas = overlayCanvasRef.current;
+        const video = videoRef.current;
+        if (!canvas || !video) return;
+
+        if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+        }
+
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        const w = canvas.width;
+        const h = canvas.height;
+        const { landmarks, arm_color, back_color, l_color, r_color, warning } = data;
+
+        if (landmarks && landmarks.length > 0) {
+            // Draw lines
+            ctx.lineWidth = 3;
+            SKELETON_FULL.forEach(([s, e]) => {
+                const p1 = landmarks[s];
+                const p2 = landmarks[e];
+                if (!p1 || !p2) return;
+
+                let color = "#ffffff";
+                if (exercise === 'pushups') {
+                    if ((s === 11 || s === 13 || s === 12 || s === 14) && (e === 13 || e === 15 || e === 14 || e === 16)) {
+                        color = arm_color || "#ffffff";
+                    } else if ([11, 12, 23, 24, 25, 26].includes(s) && [23, 24, 25, 26, 27, 28].includes(e)) {
+                        color = back_color || "#ffffff";
+                    }
+                } else {
+                    if ((s === 23 || s === 25) && (e === 25 || e === 27)) {
+                        color = l_color || "#ffffff";
+                    } else if ((s === 24 || s === 26) && (e === 26 || e === 28)) {
+                        color = r_color || "#ffffff";
+                    } else if ((s === 11 && e === 23) || (s === 12 && e === 24) || (s === 23 && e === 24)) {
+                        color = back_color || "#ffffff";
+                    }
+                }
+
+                ctx.strokeStyle = color;
+                ctx.beginPath();
+                ctx.moveTo(p1.x * w, p1.y * h);
+                ctx.lineTo(p2.x * w, p2.y * h);
+                ctx.stroke();
+            });
+
+            // Draw points
+            ctx.fillStyle = "#ff00ff";
+            for (let i = 11; i <= 32; i++) {
+                const p = landmarks[i];
+                if (p) {
+                    ctx.beginPath();
+                    ctx.arc(p.x * w, p.y * h, 5, 0, 2 * Math.PI);
+                    ctx.fill();
+                }
+            }
+
+            if (warning) {
+                ctx.fillStyle = "#ff0000";
+                ctx.font = "bold 30px Arial";
+                ctx.fillText(warning, 30, h - 30);
+            }
+        }
+    };
+
     const stopCamera = async () => {
         // 1. Stop the loop
         if (intervalRef.current) clearInterval(intervalRef.current);
@@ -175,7 +254,11 @@ export default function TrainingRoom() {
         }
 
         setCameraStatus("OFFLINE");
-        setProcessedFrame(null); // Clear the last AI frame
+        if (overlayCanvasRef.current) {
+            const canvas = overlayCanvasRef.current;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
 
         // 4. SYNC TO NODE.JS DATABASE (Only if they actually did reps!)
         if (reps > 0) {
@@ -252,25 +335,22 @@ export default function TrainingRoom() {
                         }`}
                     style={isFullscreen ? {} : { aspectRatio: '16/9' }}
                 >
-                    {/* The raw invisible video element */}
+                    {/* The raw video element (now visible!) */}
                     <video 
                         ref={videoRef} 
-                        className="opacity-0 absolute w-[1px] h-[1px]" 
+                        className={`transition-all duration-300 ${cameraStatus === "ACTIVE" ? 'w-full h-full' : 'opacity-0 absolute w-[1px] h-[1px]'} ${isFullscreen ? 'object-contain' : 'object-cover'}`} 
                         muted 
                         playsInline
                     ></video>
                     
-                    {/* Hidden canvas for taking pictures */}
+                    {/* Hidden canvas for taking pictures to send to Python */}
                     <canvas ref={canvasRef} className="hidden"></canvas>
 
-                    {/* THE AI PROCESSED STREAM */}
-                    {processedFrame && cameraStatus === "ACTIVE" && (
-                        <img 
-                            src={processedFrame} 
-                            alt="AI Feed" 
-                            className={`w-full h-full transition-all duration-300 ${isFullscreen ? 'object-contain' : 'object-cover'}`} 
-                        />
-                    )}
+                    {/* OVERLAY CANVAS FOR DRAWING SKELETON */}
+                    <canvas 
+                        ref={overlayCanvasRef} 
+                        className={`absolute inset-0 w-full h-full pointer-events-none transition-all duration-300 ${isFullscreen ? 'object-contain' : 'object-cover'} ${cameraStatus === "ACTIVE" ? 'opacity-100' : 'opacity-0'}`} 
+                    ></canvas>
 
                     {/* Offline Screen */}
                     {cameraStatus !== "ACTIVE" && (

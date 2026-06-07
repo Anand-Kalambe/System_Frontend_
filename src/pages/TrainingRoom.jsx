@@ -20,7 +20,12 @@ export default function TrainingRoom() {
     const streamRef = useRef(null);
     const intervalRef = useRef(null);
     const panelRef = useRef(null);
-    const isProcessingRef = useRef(false);
+    const isProcessingRef = useRef(0); // Tracks in-flight websocket requests
+    
+    // Smooth animation refs
+    const animationRef = useRef(null);
+    const targetDataRef = useRef(null);
+    const currentDataRef = useRef(null);
 
     const SKELETON_FULL = [
         [11, 12], [11, 13], [13, 15], [12, 14], [14, 16],
@@ -74,6 +79,7 @@ export default function TrainingRoom() {
     useEffect(() => {
         return () => {
             if (intervalRef.current) clearInterval(intervalRef.current);
+            if (animationRef.current) cancelAnimationFrame(animationRef.current);
             if (streamRef.current) {
                 streamRef.current.getTracks().forEach(track => track.stop());
             }
@@ -106,12 +112,19 @@ export default function TrainingRoom() {
                 setCameraStatus("ACTIVE");
                 setReps(0);
                 
-                // 3. Start taking pictures 10 times a second and sending them
-                intervalRef.current = setInterval(captureAndSendFrame, 100); 
+                // Start sending frames faster (20 FPS max), backpressure will limit it automatically
+                intervalRef.current = setInterval(captureAndSendFrame, 50); 
+
+                // Start smooth render loop
+                const renderLoop = () => {
+                    interpolateAndDraw();
+                    animationRef.current = requestAnimationFrame(renderLoop);
+                };
+                renderLoop();
             };
 
             wsRef.current.onmessage = (event) => {
-                isProcessingRef.current = false; // Unlock sending next frame
+                isProcessingRef.current = Math.max(0, isProcessingRef.current - 1); // Decrement in-flight counter
                 const data = JSON.parse(event.data);
                 
                 // Update reps if Python sends them
@@ -119,10 +132,11 @@ export default function TrainingRoom() {
                     setReps(data.reps);
                 }
                 
-                if (data.landmarks && overlayCanvasRef.current && videoRef.current) {
-                    drawOverlay(data);
+                if (data.landmarks) {
+                    targetDataRef.current = data;
                 } else if (overlayCanvasRef.current && videoRef.current) {
-                    // Clear overlay if no landmarks
+                    targetDataRef.current = null;
+                    currentDataRef.current = null;
                     const canvas = overlayCanvasRef.current;
                     const ctx = canvas.getContext('2d');
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -147,14 +161,14 @@ export default function TrainingRoom() {
     const captureAndSendFrame = () => {
         if (!videoRef.current || !canvasRef.current || !wsRef.current) return;
         if (wsRef.current.readyState !== WebSocket.OPEN) return;
-        if (isProcessingRef.current) return; // Prevent WebSocket flood/lag
+        if (isProcessingRef.current > 1) return; // Allow up to 2 in-flight frames to reduce lag
 
         const video = videoRef.current;
         const canvas = canvasRef.current;
         const context = canvas.getContext('2d');
 
-        // Downscale image to vastly improve server AI processing speed and reduce network load
-        const max_width = 480;
+        // Downscale image to match MediaPipe's native 256x256 resolution to maximize performance
+        const max_width = 256;
         const scale = Math.min(1, max_width / video.videoWidth);
         canvas.width = video.videoWidth * scale;
         canvas.height = video.videoHeight * scale;
@@ -163,10 +177,36 @@ export default function TrainingRoom() {
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
         // Convert the canvas to a Base64 string and send it to Python!
-        const base64Image = canvas.toDataURL('image/jpeg', 0.5);
+        const base64Image = canvas.toDataURL('image/jpeg', 0.4);
         
-        isProcessingRef.current = true; // Lock until server responds
+        isProcessingRef.current += 1; // Increment in-flight counter
         wsRef.current.send(base64Image);
+    };
+
+    const interpolateAndDraw = () => {
+        const target = targetDataRef.current;
+        if (!target) return;
+
+        if (!currentDataRef.current || !currentDataRef.current.landmarks || currentDataRef.current.landmarks.length === 0) {
+            currentDataRef.current = JSON.parse(JSON.stringify(target));
+        } else {
+            const current = currentDataRef.current;
+            // Lerp landmarks for buttery smooth rendering
+            for (let i = 0; i < target.landmarks.length; i++) {
+                if (current.landmarks[i] && target.landmarks[i]) {
+                    current.landmarks[i].x += (target.landmarks[i].x - current.landmarks[i].x) * 0.4;
+                    current.landmarks[i].y += (target.landmarks[i].y - current.landmarks[i].y) * 0.4;
+                }
+            }
+            // Copy exact state properties
+            current.arm_color = target.arm_color;
+            current.back_color = target.back_color;
+            current.l_color = target.l_color;
+            current.r_color = target.r_color;
+            current.warning = target.warning;
+        }
+
+        drawOverlay(currentDataRef.current);
     };
 
     const drawOverlay = (data) => {
@@ -240,6 +280,10 @@ export default function TrainingRoom() {
     const stopCamera = async () => {
         // 1. Stop the loop
         if (intervalRef.current) clearInterval(intervalRef.current);
+        if (animationRef.current) cancelAnimationFrame(animationRef.current);
+        
+        targetDataRef.current = null;
+        currentDataRef.current = null;
         
         // 2. Shut off the webcam light
         if (streamRef.current) {
@@ -338,7 +382,8 @@ export default function TrainingRoom() {
                     {/* The raw video element (now visible!) */}
                     <video 
                         ref={videoRef} 
-                        className={`transition-all duration-300 ${cameraStatus === "ACTIVE" ? 'w-full h-full' : 'opacity-0 absolute w-[1px] h-[1px]'} ${isFullscreen ? 'object-contain' : 'object-cover'}`} 
+                        className={`absolute inset-0 w-full h-full pointer-events-none transition-all duration-300 ${isFullscreen ? 'object-contain' : 'object-cover'} ${cameraStatus === "ACTIVE" ? 'opacity-100' : 'opacity-0'}`} 
+                        autoPlay
                         muted 
                         playsInline
                     ></video>
